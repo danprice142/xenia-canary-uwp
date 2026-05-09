@@ -32,6 +32,7 @@ See the [Quickstart](https://github.com/xenia-canary/xenia-canary/wiki/Quickstar
 
 ## FAQ
 
+If you have any problems with NETPLAY you can ask me on discord (https://discord.gg/NfKxgUazFj)
 See the [frequently asked questions](https://github.com/xenia-canary/xenia-canary/wiki/FAQ) page.
 
 ## Game Compatibility
