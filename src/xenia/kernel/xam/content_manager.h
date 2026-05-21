@@ -259,6 +259,7 @@ class ContentManager {
                          const XCONTENT_AGGREGATE_DATA& data);
   std::filesystem::path ResolveGameUserContentPath(const uint64_t xuid);
   bool IsContentOpen(const XCONTENT_AGGREGATE_DATA& data) const;
+  X_RESULT FlushOpenedFilesFromContent(const std::string_view root_name);
   void CloseOpenedFilesFromContent(const std::string_view root_name);
 
   uint64_t GetContentTotalSpace() const;

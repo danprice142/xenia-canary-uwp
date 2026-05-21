@@ -1100,15 +1100,15 @@ DECLARE_XAM_EXPORT1(XamUserGetUserTenure, kUserProfiles, kImplemented);
 // https://github.com/TeaModz/XeLiveStealth-Full-Source/blob/d4a7439ac6241c4a13e883a6f156623d1c08f6eb/XeLive/Utils.cpp#L416
 dword_result_t XamUserLogon_entry(lpqword_t xuids_ptr, dword_t flags,
                                   pointer_t<XAM_OVERLAPPED> overlapped_ptr) {
+  if (!xuids_ptr) {
+    return X_ERROR_INVALID_PARAMETER;
+  }
+
   const auto host_xuids_ptr =
       kernel_memory()->TranslateVirtual<xe::be<uint64_t>*>(xuids_ptr);
 
   const auto xuids = std::vector<xe::be<uint64_t>>(
       host_xuids_ptr, host_xuids_ptr + XUserMaxUserCount);
-
-  if (!xuids_ptr) {
-    return X_ERROR_INVALID_PARAMETER;
-  }
 
   auto run = [xuids, flags](uint32_t& extended_error,
                             uint32_t& length) -> X_RESULT {

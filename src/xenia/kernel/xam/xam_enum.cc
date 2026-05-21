@@ -42,6 +42,10 @@ uint32_t xeXamEnumerate(uint32_t handle, uint32_t flags, lpvoid_t buffer_ptr,
     }
     extended_error = X_HRESULT_FROM_WIN32(result);
     length = item_count;
+    XELOGI(
+        "XamEnumerate(handle={:08X}, item_size={}, buffer_size={}, "
+        "result={:08X}, items={})",
+        e->handle(), e->item_size(), buffer_size, result, item_count);
     if (result && overlapped_ptr) {
       result = X_ERROR_FUNCTION_FAILED;
     }

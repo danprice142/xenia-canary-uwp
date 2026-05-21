@@ -47,6 +47,7 @@ class File {
   }
 
   virtual X_STATUS SetLength(size_t length) { return X_STATUS_NOT_IMPLEMENTED; }
+  virtual X_STATUS Flush() { return X_STATUS_SUCCESS; }
   virtual X_STATUS Rename(const std::filesystem::path file_path) {
     return X_STATUS_NOT_IMPLEMENTED;
   }

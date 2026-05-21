@@ -132,6 +132,14 @@ dword_result_t XamContentCreateEnumerator_entry(
     lpdword_t buffer_size_ptr, lpdword_t handle_out) {
   assert_not_null(handle_out);
 
+  XELOGI(
+      "XamContentCreateEnumerator(user={}, device={:08X}, type={:08X}, "
+      "flags={:08X}, items={})",
+      static_cast<uint32_t>(user_index), static_cast<uint32_t>(device_id),
+      static_cast<uint32_t>(content_type),
+      static_cast<uint32_t>(content_flags),
+      static_cast<uint32_t>(items_per_enumerate));
+
   auto device_info = device_id == 0 ? nullptr : GetDummyDeviceInfo(device_id);
   if ((device_id && device_info == nullptr) || !handle_out) {
     if (buffer_size_ptr) {
@@ -216,6 +224,8 @@ dword_result_t XamContentCreateEnumerator_entry(
          e->item_count());
 
   *handle_out = e->handle();
+  XELOGI("XamContentCreateEnumerator: handle={:08X}, items={}", e->handle(),
+         e->item_count());
   return X_ERROR_SUCCESS;
 }
 DECLARE_XAM_EXPORT1(XamContentCreateEnumerator, kContent, kImplemented);
@@ -273,6 +283,14 @@ dword_result_t xeXamContentCreate(dword_t user_index, lpstring_t root_name,
   if (overlapped_ptr && disposition_ptr) {
     *disposition_ptr = 0;
   }
+
+  XELOGI(
+      "XamContentCreate(root={}, user={}, type={:08X}, file={}, flags={:08X}, "
+      "xuid={:016X}, overlapped={:08X})",
+      root_name.value(), static_cast<uint32_t>(user_index),
+      static_cast<uint32_t>(content_data.content_type.get()),
+      content_data.file_name(), static_cast<uint32_t>(flags), xuid,
+      overlapped_ptr ? overlapped_ptr.guest_address() : 0);
 
   auto run = [content_manager, xuid, root_name = root_name.value(), flags,
               content_data, disposition_ptr, license_mask_ptr, overlapped_ptr](
@@ -347,6 +365,12 @@ dword_result_t xeXamContentCreate(dword_t user_index, lpstring_t root_name,
       *disposition_ptr = static_cast<uint32_t>(disposition);
     }
 
+    XELOGI(
+        "XamContentCreate result root={}, file={}, result={:08X}, "
+        "disposition={}",
+        root_name, content_data.file_name(), result,
+        static_cast<uint32_t>(disposition));
+
     if (result && overlapped_ptr) {
       result = X_ERROR_FUNCTION_FAILED;
     }
@@ -414,7 +438,11 @@ DECLARE_XAM_EXPORT1(XamContentOpenFile, kContent, kStub);
 
 dword_result_t XamContentFlush_entry(lpstring_t root_name,
                                      pointer_t<XAM_OVERLAPPED> overlapped_ptr) {
-  X_RESULT result = X_ERROR_SUCCESS;
+  XELOGI("XamContentFlush(root={}, overlapped={:08X})", root_name.value(),
+         overlapped_ptr ? overlapped_ptr.guest_address() : 0);
+  X_RESULT result =
+      kernel_state()->content_manager()->FlushOpenedFilesFromContent(
+          root_name.value());
   if (overlapped_ptr) {
     kernel_state()->CompleteOverlappedImmediate(overlapped_ptr, result);
     return X_ERROR_IO_PENDING;
@@ -422,7 +450,7 @@ dword_result_t XamContentFlush_entry(lpstring_t root_name,
     return result;
   }
 }
-DECLARE_XAM_EXPORT1(XamContentFlush, kContent, kStub);
+DECLARE_XAM_EXPORT1(XamContentFlush, kContent, kImplemented);
 
 dword_result_t XamContentClose_entry(lpstring_t root_name,
                                      pointer_t<XAM_OVERLAPPED> overlapped_ptr) {

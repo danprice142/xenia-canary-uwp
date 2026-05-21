@@ -541,7 +541,8 @@ DECLARE_XBOXKRNL_EXPORT1(NtQueryDirectoryFile, kFileSystem, kImplemented);
 
 dword_result_t NtFlushBuffersFile_entry(
     dword_t file_handle, pointer_t<X_IO_STATUS_BLOCK> io_status_block_ptr) {
-  auto result = X_STATUS_SUCCESS;
+  auto file = kernel_state()->object_table()->LookupObject<XFile>(file_handle);
+  auto result = file ? file->Flush() : X_STATUS_INVALID_HANDLE;
 
   if (io_status_block_ptr) {
     io_status_block_ptr->status = result;
@@ -550,7 +551,7 @@ dword_result_t NtFlushBuffersFile_entry(
 
   return result;
 }
-DECLARE_XBOXKRNL_EXPORT1(NtFlushBuffersFile, kFileSystem, kStub);
+DECLARE_XBOXKRNL_EXPORT1(NtFlushBuffersFile, kFileSystem, kImplemented);
 
 // https://docs.microsoft.com/en-us/windows/win32/devnotes/ntopensymboliclinkobject
 dword_result_t NtOpenSymbolicLinkObject_entry(

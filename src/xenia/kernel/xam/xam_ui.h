@@ -69,6 +69,8 @@ class MessageBoxDialog : public XamDialog {
   std::vector<std::string> buttons_;
   uint32_t default_button_ = 0;
   uint32_t chosen_button_ = 0;
+  uint64_t opened_host_ms_ = 0;
+  bool input_ready_logged_ = false;
 };
 
 class KeyboardInputDialog : public XamDialog {

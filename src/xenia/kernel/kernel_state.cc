@@ -619,13 +619,13 @@ const object_ref<UserModule> KernelState::LoadTitleUpdate(
   uint32_t content_license = 0;
   X_RESULT open_status = content_manager()->OpenContent(
       "UPDATE", 0, *title_update, content_license, disc_number);
-
-  std::string mount_path = "";
-  if (!file_system()->FindSymbolicLink(kDefaultGameSymbolicLink, mount_path)) {
+  if (XFAILED(open_status)) {
+    XELOGW("Failed to open title update content, code: {:08X}", open_status);
     return nullptr;
   }
 
-  if (!module->path().starts_with(mount_path)) {
+  std::string mount_path = "";
+  if (!file_system()->FindSymbolicLink(kDefaultGameSymbolicLink, mount_path)) {
     return nullptr;
   }
 
@@ -635,11 +635,19 @@ const object_ref<UserModule> KernelState::LoadTitleUpdate(
     return nullptr;
   }
 
-  const std::string relative_path =
-      module->path().substr(mount_path.size() + 1) + 'p';
+  xe::vfs::Entry* patch_entry = nullptr;
+  if (module->path().starts_with(mount_path) &&
+      module->path().size() > mount_path.size() + 1) {
+    const std::string relative_path =
+        module->path().substr(mount_path.size() + 1) + 'p';
+    patch_entry = kernel_state()->file_system()->ResolvePath(resolved_path +
+                                                             relative_path);
+  }
 
-  xe::vfs::Entry* patch_entry =
-      kernel_state()->file_system()->ResolvePath(resolved_path + relative_path);
+  if (!patch_entry) {
+    patch_entry = kernel_state()->file_system()->ResolvePath(
+        resolved_path + fmt::format("{0}.xexp", module->name()));
+  }
 
   if (!patch_entry) {
     return nullptr;

@@ -49,6 +49,53 @@ dword_result_t XamVoiceGetMicArrayStatus_entry() {
 }
 DECLARE_XAM_EXPORT1(XamVoiceGetMicArrayStatus, kNone, kStub);
 
+dword_result_t XamVoiceSetMicArrayIdleUsers_entry(dword_t user_mask) {
+  return X_ERROR_DEVICE_NOT_CONNECTED;
+}
+DECLARE_XAM_EXPORT1(XamVoiceSetMicArrayIdleUsers, kNone, kStub);
+
+dword_result_t XamVoiceMuteMicArray_entry(dword_t user_index, dword_t mute) {
+  return X_ERROR_DEVICE_NOT_CONNECTED;
+}
+DECLARE_XAM_EXPORT1(XamVoiceMuteMicArray, kNone, kStub);
+
+dword_result_t XamVoiceGetMicArrayUnderrunStatus_entry(lpdword_t status_ptr) {
+  if (status_ptr) {
+    *status_ptr = 0;
+  }
+  return X_ERROR_DEVICE_NOT_CONNECTED;
+}
+DECLARE_XAM_EXPORT1(XamVoiceGetMicArrayUnderrunStatus, kNone, kStub);
+
+dword_result_t XamVoiceGetMicArrayAudioEx_entry(dword_t user_index,
+                                                lpunknown_t buffer_ptr,
+                                                dword_t buffer_size,
+                                                lpdword_t written_ptr,
+                                                lpunknown_t flags_ptr) {
+  if (written_ptr) {
+    *written_ptr = 0;
+  }
+  return X_ERROR_DEVICE_NOT_CONNECTED;
+}
+DECLARE_XAM_EXPORT1(XamVoiceGetMicArrayAudioEx, kNone, kStub);
+
+dword_result_t XamVoiceDisableMicArray_entry(dword_t disabled) {
+  return X_ERROR_DEVICE_NOT_CONNECTED;
+}
+DECLARE_XAM_EXPORT1(XamVoiceDisableMicArray, kNone, kStub);
+
+dword_result_t XamVoiceSetMicArrayBeamAngle_entry(dword_t user_index,
+                                                  dword_t angle) {
+  return X_ERROR_DEVICE_NOT_CONNECTED;
+}
+DECLARE_XAM_EXPORT1(XamVoiceSetMicArrayBeamAngle, kNone, kStub);
+
+dword_result_t XamVoiceGetMicArrayFilenameDesc_entry(dword_t user_index,
+                                                     lpunknown_t desc_ptr) {
+  return X_ERROR_DEVICE_NOT_CONNECTED;
+}
+DECLARE_XAM_EXPORT1(XamVoiceGetMicArrayFilenameDesc, kNone, kStub);
+
 }  // namespace xam
 }  // namespace kernel
 }  // namespace xe

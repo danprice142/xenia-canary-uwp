@@ -9,6 +9,7 @@
 
 #include "xenia/kernel/xam/xam_ui.h"
 #include "xenia/app/ui_text_effect_helpers.h"
+#include "xenia/base/clock.h"
 #include "xenia/base/cvar.h"
 #include "xenia/base/logging.h"
 #include "xenia/base/png_utils.h"
@@ -41,6 +42,14 @@ namespace xam {
 
 namespace {
 ui::SigninUI* g_active_signin_dialog = nullptr;
+uint64_t g_last_offline_prompt_host_ms = 0;
+uint32_t g_last_offline_prompt_button = 1;
+
+bool IsOfflineProfilePrompt(const std::string& title,
+                            const std::string& text) {
+  return title == "Gamer profile not online" &&
+         text.find("Xbox LIVE enabled gamer profile") != std::string::npos;
+}
 
 float DrawWrappedConfiguredText(ImDrawList* draw_list, ImFont* font,
                                 float font_size, ImVec2 pos,
@@ -143,13 +152,11 @@ X_RESULT xeXamDispatchDialog(T* dialog,
     } else {
       delete dialog;
     }
+    kernel_state()->BroadcastNotification(kXNotificationSystemUI, false);
     // dialog should be deleted at this point!
     return result;
   };
-  auto post = []() {
-    xe::threading::Sleep(std::chrono::milliseconds(100));
-    kernel_state()->BroadcastNotification(kXNotificationSystemUI, false);
-  };
+  auto post = []() {};
   if (!overlapped) {
     pre();
     auto result = run();
@@ -298,6 +305,17 @@ X_RESULT xeXamDispatchHeadlessAsync(std::function<void()> run_callback) {
 }
 
 void MessageBoxDialog::OnDraw(ImGuiIO& io) {
+  if (!opened_host_ms_) {
+    opened_host_ms_ = xe::Clock::QueryHostUptimeMillis();
+  }
+
+  const uint64_t now_host_ms = xe::Clock::QueryHostUptimeMillis();
+  const bool activation_allowed = now_host_ms - opened_host_ms_ >= 500;
+  if (activation_allowed && !input_ready_logged_) {
+    input_ready_logged_ = true;
+    XELOGI("MessageBoxDialog input ready: title=\"{}\"", title_);
+  }
+
 #if XE_PLATFORM_WINRT
   if (!has_opened_) {
     has_opened_ = true;
@@ -406,17 +424,13 @@ void MessageBoxDialog::OnDraw(ImGuiIO& io) {
     chosen_button_ = static_cast<uint32_t>(buttons_.size() - 1);
   }
 
-  const bool confirm_down = ImGui::IsKeyDown(ImGuiKey_Enter) ||
-                            ImGui::IsKeyDown(ImGuiKey_KeypadEnter) ||
-                            ImGui::IsKeyDown(ImGuiKey_Space) ||
-                            ImGui::IsKeyDown(ImGuiKey_GamepadFaceDown);
   const bool cancel_down = ImGui::IsKeyDown(ImGuiKey_Escape) ||
                            ImGui::IsKeyDown(ImGuiKey_GamepadFaceRight);
   const bool should_focus_button =
-      focus_requested_ &&
+      activation_allowed && focus_requested_ &&
       ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) &&
       !ImGui::IsAnyItemActive() && !ImGui::IsMouseClicked(0) &&
-      !(confirm_down || cancel_down);
+      !cancel_down;
   if (should_focus_button) {
     focus_requested_ = false;
   }
@@ -440,7 +454,11 @@ void MessageBoxDialog::OnDraw(ImGuiIO& io) {
     if (should_focus_button && i == chosen_button_) {
       ImGui::SetKeyboardFocusHere();
     }
-    if (xe::app::DrawTextEffectButton(buttons_[i].c_str(), button_size)) {
+    ImGui::BeginDisabled(!activation_allowed);
+    const bool pressed =
+        xe::app::DrawTextEffectButton(buttons_[i].c_str(), button_size);
+    ImGui::EndDisabled();
+    if (pressed && activation_allowed) {
       choose_button(static_cast<uint32_t>(i));
       ImGui::PopID();
       ImGui::End();
@@ -507,11 +525,14 @@ void MessageBoxDialog::OnDraw(ImGuiIO& io) {
       ImGui::SameLine();
     }
     ImGui::PushID(static_cast<int>(i));
-    if (focus_requested_ && i == chosen_button_) {
+    if (activation_allowed && focus_requested_ && i == chosen_button_) {
       ImGui::SetKeyboardFocusHere();
       focus_requested_ = false;
     }
-    if (ImGui::Button(buttons_[i].c_str())) {
+    ImGui::BeginDisabled(!activation_allowed);
+    const bool pressed = ImGui::Button(buttons_[i].c_str());
+    ImGui::EndDisabled();
+    if (pressed && activation_allowed) {
       chosen_button_ = static_cast<uint32_t>(i);
       ImGui::CloseCurrentPopup();
       Close();
@@ -525,8 +546,9 @@ void MessageBoxDialog::OnDraw(ImGuiIO& io) {
     ImGui::PopID();
   }
 
-  if (ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false) ||
-      ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
+  if (activation_allowed &&
+      (ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false) ||
+       ImGui::IsKeyPressed(ImGuiKey_Escape, false))) {
     chosen_button_ = default_button_ < buttons_.size() ? default_button_ : 0;
     ImGui::CloseCurrentPopup();
     Close();
@@ -610,12 +632,63 @@ static dword_result_t XamShowMessageBoxUi(
         kernel_state()->memory()->TranslateVirtual(button_ptr));
     buttons.push_back(xe::to_utf8(button));
   }
+  std::string button_labels;
+  for (size_t i = 0; i < buttons.size(); ++i) {
+    if (i) {
+      button_labels += ", ";
+    }
+    button_labels += fmt::format("{}:\"{}\"", i, buttons[i]);
+  }
+
+  XELOGI(
+      "XamShowMessageBoxUI(user={}, title=\"{}\", text=\"{}\", buttons={}, "
+      "labels=[{}], active={}, flags={:08X}, result={:08X}, overlapped={:08X})",
+      static_cast<uint32_t>(user_index), title, text,
+      static_cast<uint32_t>(button_count), button_labels,
+      static_cast<uint32_t>(active_button), static_cast<uint32_t>(flags),
+      result_ptr ? result_ptr.guest_address() : 0,
+      overlapped ? overlapped.guest_address() : 0);
+
+  const bool is_offline_profile_prompt = IsOfflineProfilePrompt(title, text);
+  const uint64_t now_host_ms = xe::Clock::QueryHostUptimeMillis();
+  if (is_offline_profile_prompt &&
+      !buttons.empty() &&
+      now_host_ms - g_last_offline_prompt_host_ms < 5000) {
+    const uint32_t chosen_button =
+        g_last_offline_prompt_button < buttons.size()
+            ? g_last_offline_prompt_button
+            : std::min<uint32_t>(1, static_cast<uint32_t>(buttons.size() - 1));
+    auto run = [result_ptr, chosen_button, buttons]() -> X_RESULT {
+      result_ptr->ButtonPressed = chosen_button;
+      const char* label = chosen_button < buttons.size()
+                              ? buttons[chosen_button].c_str()
+                              : "<out of range>";
+      XELOGI(
+          "XamShowMessageBoxUI duplicate offline prompt auto-completed "
+          "button={} label=\"{}\"",
+          chosen_button, label);
+      return X_ERROR_SUCCESS;
+    };
+    if (!overlapped) {
+      return run();
+    }
+    kernel_state()->CompleteOverlappedDeferred(run, overlapped, nullptr,
+                                               nullptr);
+    return X_ERROR_IO_PENDING;
+  }
 
   X_RESULT result;
   if (cvars::headless) {
     // Auto-pick the focused button.
-    auto run = [result_ptr, active_button]() -> X_RESULT {
+    auto run = [result_ptr, active_button, is_offline_profile_prompt,
+                now_host_ms]() -> X_RESULT {
       result_ptr->ButtonPressed = static_cast<uint32_t>(active_button);
+      if (is_offline_profile_prompt) {
+        g_last_offline_prompt_host_ms = now_host_ms;
+        g_last_offline_prompt_button = static_cast<uint32_t>(active_button);
+      }
+      XELOGI("XamShowMessageBoxUI completed headless button={}",
+             static_cast<uint32_t>(active_button));
       return X_ERROR_SUCCESS;
     };
 
@@ -650,8 +723,20 @@ static dword_result_t XamShowMessageBoxUi(
           new ui::ProfilePasscodeUI(imgui_drawer, title, text, result_ptr),
           close, overlapped);
     } else {
-      auto close = [result_ptr](MessageBoxDialog* dialog) -> X_RESULT {
-        result_ptr->ButtonPressed = dialog->chosen_button();
+      auto close = [result_ptr, buttons,
+                    is_offline_profile_prompt](MessageBoxDialog* dialog)
+          -> X_RESULT {
+        const uint32_t chosen_button = dialog->chosen_button();
+        result_ptr->ButtonPressed = chosen_button;
+        if (is_offline_profile_prompt) {
+          g_last_offline_prompt_host_ms = xe::Clock::QueryHostUptimeMillis();
+          g_last_offline_prompt_button = chosen_button;
+        }
+        const char* label = chosen_button < buttons.size()
+                                ? buttons[chosen_button].c_str()
+                                : "<out of range>";
+        XELOGI("XamShowMessageBoxUI completed button={} label=\"{}\"",
+               chosen_button, label);
         return X_ERROR_SUCCESS;
       };
 
@@ -785,25 +870,47 @@ dword_result_t XamShowDeviceSelectorUI_entry(
     qword_t total_requested, lpdword_t device_id_ptr,
     pointer_t<XAM_OVERLAPPED> overlapped) {
   if (!overlapped) {
+    XELOGI("XamShowDeviceSelectorUI invalid: missing overlapped");
     return X_ERROR_INVALID_PARAMETER;
   }
 
   if ((user_index >= XUserMaxUserCount && user_index != XUserIndexAny) ||
       (content_flags & 0x83F00008) != 0 || !device_id_ptr) {
+    XELOGI(
+        "XamShowDeviceSelectorUI invalid: user={} type={:08X} flags={:08X} "
+        "requested={} device_ptr={:08X}",
+        static_cast<uint32_t>(user_index), static_cast<uint32_t>(content_type),
+        static_cast<uint32_t>(content_flags),
+        static_cast<uint64_t>(total_requested),
+        device_id_ptr ? device_id_ptr.guest_address() : 0);
     XOverlappedSetExtendedError(overlapped, X_ERROR_INVALID_PARAMETER);
     return X_ERROR_INVALID_PARAMETER;
   }
 
   std::vector<const DummyDeviceInfo*> devices = ListStorageDevices();
+  XELOGI(
+      "XamShowDeviceSelectorUI(user={}, type={:08X}, flags={:08X}, "
+      "requested={}, device_ptr={:08X}, overlapped={:08X}, devices={}, "
+      "dialog={})",
+      static_cast<uint32_t>(user_index), static_cast<uint32_t>(content_type),
+      static_cast<uint32_t>(content_flags),
+      static_cast<uint64_t>(total_requested), device_id_ptr.guest_address(),
+      overlapped.guest_address(), devices.size(),
+      cvars::storage_selection_dialog ? "true" : "false");
 
   if (cvars::headless || !cvars::storage_selection_dialog) {
     // Default to the first storage device (HDD) if headless.
     return xeXamDispatchHeadless(
         [device_id_ptr, devices]() -> X_RESULT {
-          if (devices.empty()) return X_ERROR_CANCELLED;
+          if (devices.empty()) {
+            XELOGI("XamShowDeviceSelectorUI completed: no devices");
+            return X_ERROR_CANCELLED;
+          }
 
           const DummyDeviceInfo* device_info = devices.front();
           *device_id_ptr = static_cast<uint32_t>(device_info->device_id);
+          XELOGI("XamShowDeviceSelectorUI completed device={:08X}",
+                 static_cast<uint32_t>(device_info->device_id));
           return X_ERROR_SUCCESS;
         },
         overlapped);
@@ -811,10 +918,15 @@ dword_result_t XamShowDeviceSelectorUI_entry(
 
   auto close = [device_id_ptr, devices](MessageBoxDialog* dialog) -> X_RESULT {
     uint32_t button = dialog->chosen_button();
-    if (button >= devices.size()) return X_ERROR_CANCELLED;
+    if (button >= devices.size()) {
+      XELOGI("XamShowDeviceSelectorUI completed cancelled button={}", button);
+      return X_ERROR_CANCELLED;
+    }
 
     const DummyDeviceInfo* device_info = devices.at(button);
     *device_id_ptr = static_cast<uint32_t>(device_info->device_id);
+    XELOGI("XamShowDeviceSelectorUI completed button={} device={:08X}", button,
+           static_cast<uint32_t>(device_info->device_id));
     return X_ERROR_SUCCESS;
   };
 

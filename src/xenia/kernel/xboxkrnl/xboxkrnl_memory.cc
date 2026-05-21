@@ -172,6 +172,12 @@ dword_result_t NtAllocateVirtualMemory_entry(lpdword_t base_addr_ptr,
                 &address);
   }
   if (!address) {
+    XELOGW(
+        "NtAllocateVirtualMemory failed: requested_base {:08X}, "
+        "adjusted_base {:08X}, adjusted_size {:08X}, alloc_type {:08X}, "
+        "protect_bits {:08X}, protect {:08X}, page_size {:08X}",
+        uint32_t(*base_addr_ptr), adjusted_base, adjusted_size,
+        uint32_t(alloc_type), uint32_t(protect_bits), protect, page_size);
     // Failed - assume no memory available.
     return X_STATUS_NO_MEMORY;
   }
@@ -469,8 +475,13 @@ uint32_t xeMmAllocatePhysicalMemoryEx(uint32_t flags, uint32_t region_size,
                         adjusted_alignment, allocation_type, protect, top_down,
                         &base_address)) {
     // Failed - assume no memory available.
-    XELOGW("MmAllocatePhysicalMemoryEx: Allocation failed: {:08X} Size: {:08X}",
-           base_address, adjusted_size);
+    XELOGW(
+        "MmAllocatePhysicalMemoryEx: Allocation failed: base {:08X}, "
+        "size {:08X}, flags {:08X}, protect_bits {:08X}, protect {:08X}, "
+        "range {:08X}-{:08X}, adjusted_range {:08X}-{:08X}, alignment {:08X}",
+        base_address, adjusted_size, flags, protect_bits, protect,
+        min_addr_range, max_addr_range, heap_min_addr, heap_max_addr,
+        adjusted_alignment);
     return 0;
   }
   XELOGD("MmAllocatePhysicalMemoryEx = {:08X} Size: {:08X}", base_address,
