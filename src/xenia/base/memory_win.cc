@@ -9,6 +9,7 @@
 
 #include "xenia/base/memory.h"
 
+#include "xenia/base/logging.h"
 #include "xenia/base/platform_win.h"
 
 #if WINAPI_FAMILY_PARTITION(WINAPI_PARTITION_DESKTOP | \
@@ -124,10 +125,38 @@ void* AllocFixed(void* base_address, size_t length,
   }
   DWORD protect = ToWin32ProtectFlags(access);
 #ifdef XE_BASE_MEMORY_WIN_USE_DESKTOP_FUNCTIONS
-  return VirtualAlloc(base_address, length, alloc_type, protect);
+  void* result = VirtualAlloc(base_address, length, alloc_type, protect);
+  if (!result && base_address && allocation_type == AllocationType::kCommit) {
+    XELOGW("VirtualAlloc MEM_COMMIT failed for {}-{}, GetLastError={}",
+           fmt::ptr(base_address),
+           fmt::ptr(reinterpret_cast<uint8_t*>(base_address) + length),
+           GetLastError());
+  }
+  return result;
 #else
-  return VirtualAllocFromApp(base_address, length, ULONG(alloc_type),
-                             ULONG(protect));
+  void* result = VirtualAllocFromApp(base_address, length, ULONG(alloc_type),
+                                     ULONG(protect));
+  if (!result) {
+    DWORD alloc_error = GetLastError();
+    if (base_address && allocation_type == AllocationType::kCommit) {
+      if (Protect(base_address, length, access)) {
+        XELOGW(
+            "VirtualAllocFromApp MEM_COMMIT failed for {}-{}, "
+            "GetLastError={}, using VirtualProtectFromApp fallback",
+            fmt::ptr(base_address),
+            fmt::ptr(reinterpret_cast<uint8_t*>(base_address) + length),
+            alloc_error);
+        return base_address;
+      }
+      XELOGW(
+          "VirtualAllocFromApp MEM_COMMIT failed for {}-{}, "
+          "GetLastError={}, VirtualProtectFromApp fallback failed with {}",
+          fmt::ptr(base_address),
+          fmt::ptr(reinterpret_cast<uint8_t*>(base_address) + length),
+          alloc_error, GetLastError());
+    }
+  }
+  return result;
 #endif
 }
 
@@ -156,8 +185,7 @@ bool Protect(void* base_address, size_t length, PageAccess access,
   }
   DWORD new_protect = ToWin32ProtectFlags(access);
 
-#if XE_USE_NTDLL_FUNCTIONS == 1
-
+#if XE_USE_NTDLL_FUNCTIONS == 1 && defined(XE_BASE_MEMORY_WIN_USE_DESKTOP_FUNCTIONS)
   DWORD old_protect = 0;
   SIZE_T MemoryLength = length;
   PVOID MemoryCache = base_address;

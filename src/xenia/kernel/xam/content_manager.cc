@@ -523,6 +523,38 @@ bool ContentManager::IsContentOpen(const XCONTENT_AGGREGATE_DATA& data) const {
       });
 }
 
+X_RESULT ContentManager::FlushOpenedFilesFromContent(
+    const std::string_view root_name) {
+  const std::vector<object_ref<XFile>> all_files_handles =
+      kernel_state_->object_table()->GetObjectsByType<XFile>(
+          XObject::Type::File);
+
+  std::string resolved_path = "";
+  if (!kernel_state_->file_system()->FindSymbolicLink(
+          std::string(root_name) + ':', resolved_path)) {
+    return X_ERROR_FILE_NOT_FOUND;
+  }
+
+  X_RESULT result = X_ERROR_SUCCESS;
+  uint32_t flushed_count = 0;
+  for (const object_ref<XFile>& file : all_files_handles) {
+    std::string file_path = file->entry()->absolute_path();
+    bool is_file_inside_content = utf8::starts_with(file_path, resolved_path);
+
+    if (is_file_inside_content) {
+      result = file->Flush();
+      ++flushed_count;
+      if (XFAILED(result)) {
+        break;
+      }
+    }
+  }
+
+  XELOGI("FlushOpenedFilesFromContent(root={}, files={}, result={:08X})",
+         root_name, flushed_count, result);
+  return result;
+}
+
 void ContentManager::CloseOpenedFilesFromContent(
     const std::string_view root_name) {
   // TODO(Gliniak): Cleanup this code to care only about handles
@@ -540,6 +572,7 @@ void ContentManager::CloseOpenedFilesFromContent(
     bool is_file_inside_content = utf8::starts_with(file_path, resolved_path);
 
     if (is_file_inside_content) {
+      file->Flush();
       file->ReleaseHandle();
     }
   }

@@ -37,6 +37,15 @@ DEFINE_int32(scribble_heap_value, 0,
              "Value used to fill all allocated heap memory. 0 - Random value. "
              "Valid range: [1-255]",
              "Memory");
+#if XE_PLATFORM_WINRT
+DEFINE_bool(precommit_guest_physical_memory, false,
+            "Commit the whole guest physical memory range on startup.",
+            "Memory");
+#else
+DEFINE_bool(precommit_guest_physical_memory, true,
+            "Commit the whole guest physical memory range on startup.",
+            "Memory");
+#endif
 
 namespace xe {
 uint32_t get_page_count(uint32_t value, uint32_t page_size) {
@@ -234,13 +243,19 @@ bool Memory::Initialize() {
 
   // TODO(Gliniak): Seems like GPU has access to whole physical memory range
   // without any restriction. This however needs some form of validation.
-  // That's why we're commiting whole physical memory range and deal with
-  // allocations issues on custom page protection level.
-  for (size_t i = 1; i <= 16; i++) {
-    xe::memory::AllocFixed(heaps_.physical.TranslateRelative(i << 24),
-                           heaps_.physical.page_size() * 0x10000,
-                           xe::memory::AllocationType::kCommit,
-                           xe::memory::PageAccess::kReadWrite);
+  // That's why desktop builds commit the whole physical memory range and deal
+  // with allocation issues on custom page protection level. WinRT builds can
+  // have a tighter commit budget, so allow demand-committed physical memory
+  // there.
+  if (cvars::precommit_guest_physical_memory) {
+    for (size_t i = 1; i <= 16; i++) {
+      xe::memory::AllocFixed(heaps_.physical.TranslateRelative(i << 24),
+                             heaps_.physical.page_size() * 0x10000,
+                             xe::memory::AllocationType::kCommit,
+                             xe::memory::PageAccess::kReadWrite);
+    }
+  } else {
+    XELOGI("Guest physical memory precommit disabled.");
   }
 
   // Add handlers for MMIO.
@@ -567,13 +582,38 @@ cpu::MMIORange* Memory::LookupVirtualMappedRange(uint32_t virtual_address) {
 bool Memory::AccessViolationCallback(
     global_unique_lock_type global_lock_locked_once, void* host_address,
     bool is_write) {
+  uintptr_t host_address_value = reinterpret_cast<uintptr_t>(host_address);
+  uintptr_t physical_base = reinterpret_cast<uintptr_t>(physical_membase_);
+  uintptr_t physical_limit = physical_base + 0x20000000;
+  if (host_address_value >= physical_base && host_address_value < physical_limit) {
+    uint32_t physical_address =
+        uint32_t(host_address_value - physical_base) & 0x1FFFFFFF;
+    if (physical_address >= 0x1FFF0000) {
+      return false;
+    }
+
+    size_t host_page_size = xe::memory::page_size();
+    uintptr_t commit_address = host_address_value & ~(host_page_size - 1);
+    void* result = xe::memory::AllocFixed(
+        reinterpret_cast<void*>(commit_address), host_page_size,
+        xe::memory::AllocationType::kCommit,
+        xe::memory::PageAccess::kReadWrite);
+    if (!result) {
+      XELOGE(
+          "Unable to demand-commit guest physical backing page: physical "
+          "{:08X}, host {}",
+          physical_address, fmt::ptr(reinterpret_cast<void*>(commit_address)));
+      return false;
+    }
+
+    return true;
+  }
+
   // Access via physical_membase_ is special, when need to bypass everything
   // (for instance, for a data provider to actually write the data) so only
   // triggering callbacks on virtual memory regions.
-  if (reinterpret_cast<size_t>(host_address) <
-          reinterpret_cast<size_t>(virtual_membase_) ||
-      reinterpret_cast<size_t>(host_address) >=
-          reinterpret_cast<size_t>(physical_membase_)) {
+  if (host_address_value < reinterpret_cast<uintptr_t>(virtual_membase_) ||
+      host_address_value >= physical_base) {
     return false;
   }
   uint32_t virtual_address = HostToGuestVirtual(host_address);
@@ -994,7 +1034,13 @@ bool BaseHeap::AllocFixed(uint32_t base_address, uint32_t size,
         TranslateRelative(start_page_number * page_size_),
         page_count * page_size_, alloc_type, ToPageAccess(protect));
     if (!result) {
-      XELOGE("BaseHeap::AllocFixed failed to alloc range from host");
+      XELOGE(
+          "BaseHeap::AllocFixed failed to alloc range from host: guest "
+          "{:08X}-{:08X}, host {}, size {:08X}, page_size {:08X}, "
+          "alloc_type {:08X}, protect {:08X}",
+          base_address, base_address + page_count * page_size_,
+          fmt::ptr(TranslateRelative(start_page_number * page_size_)),
+          page_count * page_size_, page_size_, allocation_type, protect);
       return false;
     }
 
@@ -1156,7 +1202,15 @@ bool BaseHeap::AllocRange(uint32_t low_address, uint32_t high_address,
         TranslateRelative(start_page_number << page_size_shift_),
         page_count << page_size_shift_, alloc_type, ToPageAccess(protect));
     if (!result) {
-      XELOGE("BaseHeap::Alloc failed to alloc range from host");
+      XELOGE(
+          "BaseHeap::Alloc failed to alloc range from host: guest "
+          "{:08X}-{:08X}, host {}, size {:08X}, page_size {:08X}, "
+          "alloc_type {:08X}, protect {:08X}",
+          heap_base_ + (start_page_number << page_size_shift_),
+          heap_base_ + ((end_page_number + 1) << page_size_shift_),
+          fmt::ptr(TranslateRelative(start_page_number << page_size_shift_)),
+          page_count << page_size_shift_, page_size_, allocation_type,
+          protect);
       return false;
     }
 

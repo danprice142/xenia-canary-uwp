@@ -22,6 +22,7 @@ HostPathFile::HostPathFile(
 HostPathFile::~HostPathFile() = default;
 
 void HostPathFile::Destroy() {
+  Flush();
   if (entry_ && entry_->delete_on_close()) {
     entry()->Delete();
   }
@@ -70,6 +71,11 @@ X_STATUS HostPathFile::SetLength(size_t length) {
   } else {
     return X_STATUS_END_OF_FILE;
   }
+}
+
+X_STATUS HostPathFile::Flush() {
+  file_handle_->Flush();
+  return X_STATUS_SUCCESS;
 }
 
 }  // namespace vfs
