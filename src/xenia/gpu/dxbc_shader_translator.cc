@@ -20,6 +20,12 @@
 #include "xenia/gpu/xenos.h"
 #include "xenia/ui/graphics_provider.h"
 
+DEFINE_bool(dxbc_structured_forward_jumps, true,
+            "Translate forward jumps as structured ifs instead of continuing "
+            "the main loop. Works around drivers crashing on big shaders with "
+            "jumps (GTA IV on Xbox Series). Only without dxbc_switch.",
+            "GPU");
+
 // The test case for AMD is 4D5307E6 (checked in 2018).
 // Should be false for WinRt/Xbox, fixes most games.
 DEFINE_bool(dxbc_switch, false,
@@ -128,6 +134,9 @@ uint64_t DxbcShaderTranslator::GetDefaultPixelShaderModification(
 void DxbcShaderTranslator::Reset() {
   ShaderTranslator::Reset();
 
+  current_label_ = 0;
+  forward_jump_guards_ = 0;
+
   shader_code_.clear();
 
   cbuffer_count_ = 0;
@@ -186,6 +195,18 @@ uint32_t DxbcShaderTranslator::GetModificationRegisterCount() const {
   return is_vertex_shader()
              ? modification.vertex.dynamic_addressable_register_count
              : modification.pixel.dynamic_addressable_register_count;
+}
+
+bool DxbcShaderTranslator::UseStructuredForwardJumps() const {
+  // With the switch, every case ends with `pc = next label; continue`, which
+  // would overwrite pc set by a forward jump.
+  return cvars::dxbc_structured_forward_jumps && !UseSwitchForControlFlow();
+}
+
+void DxbcShaderTranslator::CloseForwardJumpGuards() {
+  for (; forward_jump_guards_; --forward_jump_guards_) {
+    a_.OpEndIf();
+  }
 }
 
 bool DxbcShaderTranslator::UseSwitchForControlFlow() const {
@@ -1118,6 +1139,7 @@ void DxbcShaderTranslator::CompleteShaderCode() {
     // Close the last exec, there's nothing to merge it with anymore, and we're
     // closing upper-level flow control blocks.
     CloseExecConditionals();
+    CloseForwardJumpGuards();
     // Close the last label and the switch.
     if (UseSwitchForControlFlow()) {
       a_.OpBreak();
@@ -1799,6 +1821,8 @@ void DxbcShaderTranslator::ProcessLabel(uint32_t cf_index) {
   // Close flow control on the deeper levels below - prevent attempts to merge
   // execs across labels.
   CloseExecConditionals();
+  CloseForwardJumpGuards();
+  current_label_ = cf_index;
   if (UseSwitchForControlFlow()) {
     // Fallthrough to the label from the previous one on the next iteration if
     // no `continue` was done. Can't simply fallthrough because in DXBC, a
@@ -2009,6 +2033,24 @@ void DxbcShaderTranslator::ProcessJumpInstruction(
   // merged), but here the instruction itself is on the flow control level, so
   // the predicate check is on the flow control level too.
   CloseInstructionPredication();
+
+  if (UseStructuredForwardJumps() && instr.target_address > current_label_) {
+    // Forward jump: set pc and skip the rest of this label block with an if
+    // instead of continuing the main loop. Labels between here and the target
+    // are skipped by their own `if (label >= pc)` checks.
+    a_.OpMov(dxbc::Dest::R(system_temp_ps_pc_p0_a0_, 0b0010),
+             dxbc::Src::LU(instr.target_address));
+    CloseExecConditionals();
+    // if (current_label >= pc), i.e. the jump wasn't taken.
+    uint32_t test_temp = PushSystemTemp();
+    a_.OpUGE(dxbc::Dest::R(test_temp, 0b0001), dxbc::Src::LU(current_label_),
+             dxbc::Src::R(system_temp_ps_pc_p0_a0_, dxbc::Src::kYYYY));
+    a_.OpIf(true, dxbc::Src::R(test_temp, dxbc::Src::kXXXX));
+    // Release test_temp.
+    PopSystemTemp();
+    ++forward_jump_guards_;
+    return;
+  }
 
   JumpToLabel(instr.target_address);
 }
