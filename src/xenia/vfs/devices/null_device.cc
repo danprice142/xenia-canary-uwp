@@ -43,7 +43,7 @@ void NullDevice::Dump(StringBuffer* string_buffer) {
 }
 
 Entry* NullDevice::ResolvePath(const std::string_view path) {
-  XELOGFS("NullDevice::ResolvePath({})", path);
+  XELOGD("NullDevice::ResolvePath({})", path);
 
   auto root = root_entry_.get();
   if (path.empty()) {
@@ -51,7 +51,7 @@ Entry* NullDevice::ResolvePath(const std::string_view path) {
   }
 
   for (auto& child : root->children()) {
-    if (!xe_strcasecmp(child->path().c_str(), path.data())) {
+    if (xe::utf8::equal_case(child->path(), path)) {
       return child.get();
     }
   }

@@ -760,6 +760,20 @@ void IoDeleteDevice_entry(dword_t device_ptr, const ppc_context_t& ctx) {
 
 DECLARE_XBOXKRNL_EXPORT1(IoDeleteDevice, kFileSystem, kStub);
 
+// The current VFS keeps mounted devices alive for the lifetime of the title.
+// Validate the guest handle and report success for this no-op dismount until
+// per-volume mount lifetime management is implemented in the VFS.
+dword_result_t IoDismountVolumeByFileHandle_entry(dword_t file_handle) {
+  auto file = kernel_state()->object_table()->LookupObject<XFile>(file_handle);
+  if (!file) {
+    return X_STATUS_INVALID_HANDLE;
+  }
+
+  return X_STATUS_SUCCESS;
+}
+DECLARE_XBOXKRNL_EXPORT1(IoDismountVolumeByFileHandle, kFileSystem,
+                         kImplemented);
+
 }  // namespace xboxkrnl
 }  // namespace kernel
 }  // namespace xe
