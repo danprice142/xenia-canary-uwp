@@ -101,3 +101,21 @@ A change is considered validated only when:
 - Xbox Series X baseline logs and traces: not yet supplied.
 - Root cause: not yet established.
 - Code-level performance fixes: not yet made or validated.
+
+
+## Resolution and upscaling workstream
+
+Keep two independent concepts separate:
+
+1. **Post-process upscaling:** the existing D3D12 presenter contains AMD FidelityFX Super Resolution 1.0 (EASU/RCAS) and CAS paths. The UI already exposes these under Display > Post-processing settings. The branch now selects FSR as the default effect so the Xbox Series X test build exercises the existing FSR path; this is a default-selection change, not a new FSR implementation.
+2. **Guest/game render-mode selection:** `internal_display_resolution` is documented in the graphics system as a requested mode for games that support multiple resolutions. It is not a universal render-scale multiplier and must not be presented as a guaranteed way to force every Xbox 360 title to render at 1440p or 4K. Do not expand its limits or change game mode enumeration until its complete call path and title behavior are verified.
+
+### Upscaling validation
+
+- Test FSR against the current bilinear baseline on Black Ops Zombies and World at War Campaign/Zombies.
+- Capture screenshots at identical scenes and compare edge stability, detail, and aliasing.
+- Compare frame-time p50/p95/p99 and GPU queue/fence behavior; revert the FSR default if it creates a repeatable performance or stability regression.
+- Verify the effective output/surface resolution on the Xbox build before claiming 1440p or 4K output.
+- Keep guest render-mode changes separate from presenter upscaling so each effect can be measured independently.
+
+Status: FSR default changed to `fsr` for testing. Build and Xbox runtime validation are still pending.
