@@ -84,7 +84,7 @@ DEFINE_string(
     "(39).",
     "Display");
 DEFINE_string(
-    postprocess_scaling_and_sharpening, "",
+    postprocess_scaling_and_sharpening, "fsr",
     "Post-processing effect to use for resampling and/or sharpening of the "
     "final display output.\n"
     "Use: [bilinear, cas, fsr]\n"
